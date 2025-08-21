@@ -15,14 +15,15 @@ import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.example.nfckeyring.ui.KeyViewModel
+import com.example.nfckeyring.data.TagEntity
+import com.example.nfckeyring.ui.TagViewModel
 import com.example.nfckeyring.util.BiometricAuth
 import com.example.nfckeyring.util.SecurePrefs
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
-    private val viewModel: KeyViewModel by viewModels()
+    private val viewModel: TagViewModel by viewModels()
     private var nfcAdapter: NfcAdapter? = null
     private var nfcPendingIntent: PendingIntent? = null
     private lateinit var nfcIntentFilters: Array<IntentFilter>
@@ -54,8 +55,8 @@ class MainActivity : AppCompatActivity() {
         BiometricAuth.authenticate(this, onSuccess = {
             viewModel.initialize()
             lifecycleScope.launch {
-                viewModel.allKeys.collect { keys ->
-                    // Observe keys; update UI as needed
+                viewModel.allTags.collect { tags ->
+                    // Observe tags; update UI as needed
                 }
             }
             val prefs = SecurePrefs.getPrefs(this)
@@ -88,10 +89,21 @@ class MainActivity : AppCompatActivity() {
                 Log.d("MainActivity", "NFC Tag discovered: $tagId")
 
                 val ndef = Ndef.get(it)
+                val tagType = it.techList.joinToString { tech -> tech.substringAfterLast('.') }
                 if (ndef != null) {
                     val message = ndef.cachedNdefMessage
                     if (message != null) {
-                        displayNdefMessage(message)
+                        val (formatted, raw) = displayNdefMessage(message)
+                        val payload = raw.replace("\n", "")
+                        val label = formatted.lineSequence().firstOrNull() ?: "Tag $tagId"
+                        val entity = TagEntity(
+                            uid = tagId,
+                            type = tagType,
+                            payload = payload,
+                            label = label,
+                            createdAt = System.currentTimeMillis()
+                        )
+                        viewModel.insert(entity)
                     } else {
                         formattedTextView.text = getString(R.string.no_ndef)
                         rawHexTextView.text = ""
@@ -104,7 +116,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun displayNdefMessage(message: NdefMessage) {
+    private fun displayNdefMessage(message: NdefMessage): Pair<String, String> {
         val formatted = StringBuilder()
         val raw = StringBuilder()
         for (record in message.records) {
@@ -121,8 +133,11 @@ class MainActivity : AppCompatActivity() {
                 }
             ).append('\n')
         }
-        formattedTextView.text = formatted.toString().trim()
-        rawHexTextView.text = raw.toString().trim()
+        val formattedStr = formatted.toString().trim()
+        val rawStr = raw.toString().trim()
+        formattedTextView.text = formattedStr
+        rawHexTextView.text = rawStr
+        return formattedStr to rawStr
     }
 
     private fun parseTextRecord(payload: ByteArray): String {
