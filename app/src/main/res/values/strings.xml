@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">NFC Keyring</string>
+    <string name="tag_uid_label">Tag UID:</string>
+    <string name="formatted_label">Formatted Data:</string>
+    <string name="raw_hex_label">Raw Hex:</string>
+    <string name="no_ndef">No NDEF data</string>
 </resources>
