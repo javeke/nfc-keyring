@@ -8,13 +8,13 @@ import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface KeyDao {
-    @Query("SELECT * FROM keys")
-    fun getAllKeys(): Flow<List<KeyEntity>>
+interface TagDao {
+    @Query("SELECT * FROM tags ORDER BY createdAt DESC")
+    fun getAllTags(): Flow<List<TagEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(key: KeyEntity)
+    suspend fun insert(tag: TagEntity)
 
     @Delete
-    suspend fun delete(key: KeyEntity)
+    suspend fun delete(tag: TagEntity)
 }
