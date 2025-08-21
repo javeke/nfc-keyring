@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.nfckeyring.data.TagEntity
 import com.example.nfckeyring.ui.TagViewModel
 import com.example.nfckeyring.ui.TagListAdapter
+import com.example.nfckeyring.ui.TagDetailActivity
 import com.example.nfckeyring.util.BiometricAuth
 import com.example.nfckeyring.util.SecurePrefs
 import kotlinx.coroutines.launch
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
 
         val recyclerView = findViewById<RecyclerView>(R.id.tagRecyclerView)
         tagAdapter = TagListAdapter(
+            onClick = { openDetail(it) },
             onRename = { showRenameDialog(it) },
             onEdit = { showEditDialog(it) },
             onDelete = { showDeleteDialog(it) }
@@ -170,6 +172,13 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun openDetail(tag: TagEntity) {
+        val intent = Intent(this, TagDetailActivity::class.java).apply {
+            putExtra("tag", tag)
+        }
+        startActivity(intent)
     }
 
     private fun displayNdefMessage(message: NdefMessage): Pair<String, String> {

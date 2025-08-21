@@ -10,6 +10,7 @@ import com.example.nfckeyring.R
 import com.example.nfckeyring.data.TagEntity
 
 class TagListAdapter(
+    private val onClick: (TagEntity) -> Unit,
     private val onRename: (TagEntity) -> Unit,
     private val onEdit: (TagEntity) -> Unit,
     private val onDelete: (TagEntity) -> Unit
@@ -34,6 +35,7 @@ class TagListAdapter(
         holder.renameButton.setOnClickListener { onRename(tag) }
         holder.editButton.setOnClickListener { onEdit(tag) }
         holder.deleteButton.setOnClickListener { onDelete(tag) }
+        holder.itemView.setOnClickListener { onClick(tag) }
     }
 
     override fun getItemCount(): Int = tags.size

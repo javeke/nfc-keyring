@@ -2,6 +2,7 @@ package com.example.nfckeyring.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import java.io.Serializable
 
 @Entity(tableName = "tags")
 data class TagEntity(
@@ -11,4 +12,4 @@ data class TagEntity(
     val payload: String,
     val label: String,
     val createdAt: Long
-)
+) : Serializable

@@ -13,4 +13,6 @@
     <string name="confirm_delete">Are you sure you want to delete this tag?</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
+    <string name="activate_emulation">Activate Emulation</string>
+    <string name="emulation_started">Emulation activated for %1$s</string>
 </resources>
