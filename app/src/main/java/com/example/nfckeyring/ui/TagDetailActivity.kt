@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.example.nfckeyring.R
 import com.example.nfckeyring.data.TagEntity
+import com.example.nfckeyring.util.SecurePrefs
 
 class TagDetailActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,7 +25,13 @@ class TagDetailActivity : AppCompatActivity() {
             formattedView.text = formatPayload(it.payload)
             rawView.text = it.payload
             emulateButton.setOnClickListener { _ ->
-                Toast.makeText(this, getString(R.string.emulation_started, it.label), Toast.LENGTH_SHORT).show()
+                val prefs = SecurePrefs.getPrefs(this)
+                prefs.edit().putInt("selected_tag_id", it.id).apply()
+                Toast.makeText(
+                    this,
+                    getString(R.string.emulation_started, it.label),
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
