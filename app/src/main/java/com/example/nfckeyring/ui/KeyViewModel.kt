@@ -11,20 +11,25 @@ import kotlinx.coroutines.launch
 
 class KeyViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: KeyRepository
-    val allKeys: Flow<List<KeyEntity>>
+    private lateinit var repository: KeyRepository
+    lateinit var allKeys: Flow<List<KeyEntity>>
 
-    init {
-        val dao = AppDatabase.getDatabase(application).keyDao()
+    fun initialize() {
+        if (this::repository.isInitialized) return
+        val dao = AppDatabase.getDatabase(getApplication()).keyDao()
         repository = KeyRepository(dao)
         allKeys = repository.allKeys
     }
 
     fun insert(key: KeyEntity) = viewModelScope.launch {
-        repository.insert(key)
+        if (this::repository.isInitialized) {
+            repository.insert(key)
+        }
     }
 
     fun delete(key: KeyEntity) = viewModelScope.launch {
-        repository.delete(key)
+        if (this::repository.isInitialized) {
+            repository.delete(key)
+        }
     }
 }

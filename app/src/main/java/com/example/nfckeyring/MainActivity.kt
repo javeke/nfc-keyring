@@ -5,6 +5,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.nfckeyring.ui.KeyViewModel
+import com.example.nfckeyring.util.BiometricAuth
 import com.example.nfckeyring.util.SecurePrefs
 import kotlinx.coroutines.launch
 
@@ -16,15 +17,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        lifecycleScope.launch {
-            viewModel.allKeys.collect { keys ->
-                // Observe keys; update UI as needed
+        BiometricAuth.authenticate(this, onSuccess = {
+            viewModel.initialize()
+            lifecycleScope.launch {
+                viewModel.allKeys.collect { keys ->
+                    // Observe keys; update UI as needed
+                }
             }
-        }
-
-        val prefs = SecurePrefs.getPrefs(this)
-        if (!prefs.contains("initialized")) {
-            prefs.edit().putBoolean("initialized", true).apply()
-        }
+            val prefs = SecurePrefs.getPrefs(this)
+            if (!prefs.contains("initialized")) {
+                prefs.edit().putBoolean("initialized", true).apply()
+            }
+        }, onError = {
+            finish()
+        })
     }
 }
