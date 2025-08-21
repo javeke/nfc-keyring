@@ -25,4 +25,11 @@
         android:layout_marginTop="16dp"
         android:text="@string/raw_hex_label" />
 
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/tagRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="16dp"
+        android:layout_weight="1" />
+
 </LinearLayout>

@@ -12,11 +12,15 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.EditText
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.RecyclerView
 import com.example.nfckeyring.data.TagEntity
 import com.example.nfckeyring.ui.TagViewModel
+import com.example.nfckeyring.ui.TagListAdapter
 import com.example.nfckeyring.util.BiometricAuth
 import com.example.nfckeyring.util.SecurePrefs
 import kotlinx.coroutines.launch
@@ -30,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tagUidTextView: TextView
     private lateinit var formattedTextView: TextView
     private lateinit var rawHexTextView: TextView
+    private lateinit var tagAdapter: TagListAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +43,14 @@ class MainActivity : AppCompatActivity() {
         tagUidTextView = findViewById(R.id.tagUidTextView)
         formattedTextView = findViewById(R.id.formattedTextView)
         rawHexTextView = findViewById(R.id.rawHexTextView)
+
+        val recyclerView = findViewById<RecyclerView>(R.id.tagRecyclerView)
+        tagAdapter = TagListAdapter(
+            onRename = { showRenameDialog(it) },
+            onEdit = { showEditDialog(it) },
+            onDelete = { showDeleteDialog(it) }
+        )
+        recyclerView.adapter = tagAdapter
 
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
         val intent = Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -56,7 +69,7 @@ class MainActivity : AppCompatActivity() {
             viewModel.initialize()
             lifecycleScope.launch {
                 viewModel.allTags.collect { tags ->
-                    // Observe tags; update UI as needed
+                    tagAdapter.submitList(tags)
                 }
             }
             val prefs = SecurePrefs.getPrefs(this)
@@ -114,6 +127,49 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun showRenameDialog(tag: TagEntity) {
+        val editText = EditText(this)
+        editText.setText(tag.label)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.rename_tag)
+            .setView(editText)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val newLabel = editText.text.toString()
+                if (newLabel.isNotBlank()) {
+                    viewModel.update(tag.copy(label = newLabel))
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun showEditDialog(tag: TagEntity) {
+        val editText = EditText(this)
+        editText.setText(tag.payload)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.edit_tag)
+            .setView(editText)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val newPayload = editText.text.toString()
+                if (newPayload.isNotBlank()) {
+                    viewModel.update(tag.copy(payload = newPayload))
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun showDeleteDialog(tag: TagEntity) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.delete_tag)
+            .setMessage(R.string.confirm_delete)
+            .setPositiveButton(R.string.delete) { _, _ ->
+                viewModel.delete(tag)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun displayNdefMessage(message: NdefMessage): Pair<String, String> {

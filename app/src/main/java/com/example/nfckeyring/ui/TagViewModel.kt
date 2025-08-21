@@ -27,6 +27,12 @@ class TagViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun update(tag: TagEntity) = viewModelScope.launch {
+        if (this::repository.isInitialized) {
+            repository.update(tag)
+        }
+    }
+
     fun delete(tag: TagEntity) = viewModelScope.launch {
         if (this::repository.isInitialized) {
             repository.delete(tag)
