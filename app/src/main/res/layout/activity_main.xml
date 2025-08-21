@@ -2,11 +2,27 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:padding="16dp">
 
     <TextView
-        android:layout_width="wrap_content"
+        android:id="@+id/tagUidTextView"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Hello NFC Keyring!" />
+        android:text="@string/tag_uid_label" />
+
+    <TextView
+        android:id="@+id/formattedTextView"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/formatted_label" />
+
+    <TextView
+        android:id="@+id/rawHexTextView"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/raw_hex_label" />
+
 </LinearLayout>
