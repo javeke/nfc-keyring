@@ -15,4 +15,7 @@
     <string name="cancel">Cancel</string>
     <string name="activate_emulation">Activate Emulation</string>
     <string name="emulation_started">Emulation activated for %1$s</string>
+    <string name="emulation_active">Active Tag Emulation</string>
+    <string name="stop_emulation">Stop Emulation</string>
+    <string name="emulation_stopped">Emulation stopped</string>
 </resources>

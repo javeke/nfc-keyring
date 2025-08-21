@@ -32,4 +32,20 @@
         android:layout_marginTop="24dp"
         android:text="@string/activate_emulation" />
 
+    <TextView
+        android:id="@+id/emulationStatusTextView"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/emulation_active"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/stopButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/stop_emulation"
+        android:visibility="gone" />
+
 </LinearLayout>

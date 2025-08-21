@@ -1,6 +1,7 @@
 package com.example.nfckeyring.ui
 
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -19,19 +20,43 @@ class TagDetailActivity : AppCompatActivity() {
         val formattedView = findViewById<TextView>(R.id.formattedTextView)
         val rawView = findViewById<TextView>(R.id.rawHexTextView)
         val emulateButton = findViewById<Button>(R.id.emulateButton)
+        val statusView = findViewById<TextView>(R.id.emulationStatusTextView)
+        val stopButton = findViewById<Button>(R.id.stopButton)
 
-        tag?.let {
-            labelView.text = it.label
-            formattedView.text = formatPayload(it.payload)
-            rawView.text = it.payload
-            emulateButton.setOnClickListener { _ ->
-                val prefs = SecurePrefs.getPrefs(this)
-                prefs.edit().putInt("selected_tag_id", it.id).apply()
+        tag?.let { currentTag ->
+            labelView.text = currentTag.label
+            formattedView.text = formatPayload(currentTag.payload)
+            rawView.text = currentTag.payload
+            val prefs = SecurePrefs.getPrefs(this)
+            val selectedId = prefs.getInt("selected_tag_id", -1)
+            if (selectedId == currentTag.id) {
+                statusView.visibility = View.VISIBLE
+                stopButton.visibility = View.VISIBLE
+                emulateButton.visibility = View.GONE
+            }
+
+            emulateButton.setOnClickListener {
+                prefs.edit().putInt("selected_tag_id", currentTag.id).apply()
                 Toast.makeText(
                     this,
-                    getString(R.string.emulation_started, it.label),
+                    getString(R.string.emulation_started, currentTag.label),
                     Toast.LENGTH_SHORT
                 ).show()
+                statusView.visibility = View.VISIBLE
+                stopButton.visibility = View.VISIBLE
+                emulateButton.visibility = View.GONE
+            }
+
+            stopButton.setOnClickListener {
+                prefs.edit().remove("selected_tag_id").apply()
+                Toast.makeText(
+                    this,
+                    getString(R.string.emulation_stopped),
+                    Toast.LENGTH_SHORT
+                ).show()
+                statusView.visibility = View.GONE
+                stopButton.visibility = View.GONE
+                emulateButton.visibility = View.VISIBLE
             }
         }
     }
