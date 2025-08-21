@@ -7,5 +7,7 @@ class TagRepository(private val tagDao: TagDao) {
 
     suspend fun insert(tag: TagEntity) = tagDao.insert(tag)
 
+    suspend fun update(tag: TagEntity) = tagDao.update(tag)
+
     suspend fun delete(tag: TagEntity) = tagDao.delete(tag)
 }
