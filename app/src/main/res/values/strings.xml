@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">NFC Keychain</string>
+    <string name="nfc_ready">NFC Ready</string>
+    <string name="nfc_disabled">NFC Disabled</string>
+    <string name="tap_nfc_tag">Tap an NFC tag to read it</string>
+    <string name="enable_nfc_settings">Enable NFC in settings</string>
+    <string name="no_keys_stored">No Keys Stored</string>
+    <string name="add_first_key">Tap the + button to add your first NFC key</string>
+    <string name="add_key">Add Key</string>
+    
+    <!-- HCE Service Strings -->
+    <string name="hce_service_description">NFC Keychain Tag Emulation Service</string>
+    <string name="hce_aid_group_description">NFC Keychain emulation for saved tags</string>
+    
+    <!-- Emulation Strings -->
+    <string name="emulate">Emulate</string>
+    <string name="stop_emulation">Stop Emulation</string>
+    <string name="emulating">Emulating...</string>
+    <string name="emulation_active">Emulation Active</string>
+    <string name="emulation_stopped">Emulation Stopped</string>
+    <string name="hold_near_reader">Hold near NFC reader to emulate this tag</string>
+</resources>
