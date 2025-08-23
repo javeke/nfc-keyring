@@ -11,6 +11,8 @@ import com.luvia.nfckeychain.security.BiometricManager
 import com.luvia.nfckeychain.security.BiometricResult
 import com.luvia.nfckeychain.emulation.EmulationManager
 import com.luvia.nfckeychain.emulation.EmulationResult
+import com.luvia.nfckeychain.nfc.utils.NdefUtils
+import com.luvia.nfckeychain.nfc.utils.NfcUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +23,7 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     private val repository = NfcKeyRepository(database.nfcKeyDao())
     private val biometricManager = BiometricManager(application)
-    private val emulationManager = EmulationManager(application)
+    private var emulationManager: EmulationManager? = null
     
     private val _keys = MutableStateFlow<List<NfcKey>>(emptyList())
     val keys: StateFlow<List<NfcKey>> = _keys.asStateFlow()
@@ -42,9 +44,9 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     private val _biometricAvailable = MutableStateFlow(false)
     val biometricAvailable: StateFlow<Boolean> = _biometricAvailable.asStateFlow()
     
-    // Emulation state
-    val isEmulating: StateFlow<Boolean> = emulationManager.isEmulating
-    val emulatedTagId: StateFlow<String?> = emulationManager.emulatedTagId
+    // Emulation state - use HceService directly for state
+    val isEmulating: StateFlow<Boolean> = com.luvia.nfckeychain.hce.HceService.isEmulating
+    val emulatedTagId: StateFlow<String?> = com.luvia.nfckeychain.hce.HceService.emulatedTagId
     
     private val _emulationMessage = MutableStateFlow<String?>(null)
     val emulationMessage: StateFlow<String?> = _emulationMessage.asStateFlow()
@@ -132,6 +134,40 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun addManualNdefKey(name: String, url: String, description: String?) {
+        if (!_isAuthenticated.value) return
+        
+        viewModelScope.launch {
+            try {
+                // Generate a unique tag ID for manual NDEF keys
+                val tagId = "MANUAL_${System.currentTimeMillis()}"
+                
+                // Create NDEF URL message bytes (raw NDEF message)
+                val ndefData = NdefUtils.createUrlMessageBytes(url)
+                val dataHex = NfcUtils.bytesToHex(ndefData)
+                
+                println("DEBUG: Created manual NDEF key:")
+                println("  Name: $name")
+                println("  URL: $url")
+                println("  Tag ID: $tagId")
+                println("  NDEF Data (hex): $dataHex")
+                println("  NDEF Data length: ${ndefData.size} bytes")
+                
+                val newKey = NfcKey(
+                    name = name,
+                    description = description,
+                    tagId = tagId,
+                    tagType = "NDEF_URL",
+                    data = dataHex
+                )
+                repository.insertKey(newKey)
+                // The Flow will automatically update the keys list
+            } catch (e: Exception) {
+                println("Error adding manual NDEF key: ${e.message}")
+            }
+        }
+    }
+    
     fun updateKey(key: NfcKey) {
         if (!_isAuthenticated.value) return
         
@@ -194,12 +230,17 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     // Emulation methods
-    fun startEmulation(nfcKey: NfcKey) {
+    fun startEmulation(nfcKey: NfcKey, activity: android.app.Activity) {
         if (!_isAuthenticated.value) return
         
         viewModelScope.launch {
             try {
-                val result = emulationManager.startEmulation(nfcKey)
+                // Initialize emulation manager if needed
+                if (emulationManager == null) {
+                    emulationManager = EmulationManager(activity)
+                }
+                
+                val result = emulationManager?.startEmulation(nfcKey)
                 when (result) {
                     is EmulationResult.Success -> {
                         _emulationMessage.value = result.message
@@ -208,6 +249,10 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
                     is EmulationResult.Error -> {
                         _emulationMessage.value = result.message
                         println("DEBUG: Emulation error: ${result.message}")
+                    }
+                    null -> {
+                        _emulationMessage.value = "Emulation manager not initialized"
+                        println("DEBUG: Emulation manager not initialized")
                     }
                 }
             } catch (e: Exception) {
@@ -220,7 +265,7 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     fun stopEmulation() {
         viewModelScope.launch {
             try {
-                val result = emulationManager.stopEmulation()
+                val result = emulationManager?.stopEmulation()
                 when (result) {
                     is EmulationResult.Success -> {
                         _emulationMessage.value = result.message
@@ -229,6 +274,10 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
                     is EmulationResult.Error -> {
                         _emulationMessage.value = result.message
                         println("DEBUG: Stop emulation error: ${result.message}")
+                    }
+                    null -> {
+                        _emulationMessage.value = "Emulation manager not initialized"
+                        println("DEBUG: Stop emulation - emulation manager not initialized")
                     }
                 }
             } catch (e: Exception) {
@@ -239,7 +288,7 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun isKeyBeingEmulated(nfcKey: NfcKey): Boolean {
-        return emulationManager.isEmulating(nfcKey)
+        return emulationManager?.isEmulating(nfcKey) ?: false
     }
     
     fun clearEmulationMessage() {

@@ -9,11 +9,11 @@ import com.luvia.nfckeychain.hce.HceService
 import com.luvia.nfckeychain.nfc.utils.NfcUtils
 import kotlinx.coroutines.flow.StateFlow
 
-class EmulationManager(private val context: Context) {
+class EmulationManager(private val activity: android.app.Activity) {
     
-    private val nfcAdapter: NfcAdapter? = NfcAdapter.getDefaultAdapter(context)
+    private val nfcAdapter: NfcAdapter? = NfcAdapter.getDefaultAdapter(activity)
     private val cardEmulation: CardEmulation? = CardEmulation.getInstance(nfcAdapter)
-    private val hceServiceComponent = ComponentName(context, HceService::class.java)
+    private val hceServiceComponent = ComponentName(activity, HceService::class.java)
     
     // Expose emulation state from HceService
     val isEmulating: StateFlow<Boolean> = HceService.isEmulating
@@ -62,7 +62,7 @@ class EmulationManager(private val context: Context) {
             
             // Try to set this service as the preferred service (if supported)
             try {
-                cardEmulation?.setPreferredService(context as android.app.Activity, hceServiceComponent)
+                cardEmulation?.setPreferredService(activity, hceServiceComponent)
             } catch (e: Exception) {
                 println("DEBUG: Could not set preferred service: ${e.message}")
                 // This is not critical, continue anyway
@@ -84,7 +84,7 @@ class EmulationManager(private val context: Context) {
             
             // Unset preferred service
             try {
-                cardEmulation?.unsetPreferredService(context as android.app.Activity)
+                cardEmulation?.unsetPreferredService(activity)
             } catch (e: Exception) {
                 println("DEBUG: Could not unset preferred service: ${e.message}")
                 // This is not critical, continue anyway

@@ -8,6 +8,8 @@ import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.ToggleOff
+import androidx.compose.material.icons.filled.ToggleOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -83,13 +85,18 @@ fun KeyCard(
                     )
                 }
                 
+                // ID and Tag Type Row
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "ID: ${key.tagId.take(8)}...",
+                        text = "ID: ${key.tagId.take(10)}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     
                     Spacer(modifier = Modifier.width(8.dp))
@@ -99,15 +106,15 @@ fun KeyCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
-                    Text(
-                        text = dateFormat.format(Date(key.createdAt)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
+                
+                // Date Row
+                Text(
+                    text = "Created: ${dateFormat.format(Date(key.createdAt))}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
                 
                 if (!key.isActive) {
                     Text(
@@ -160,14 +167,6 @@ fun KeyCard(
                     leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                     onClick = {
                         onEdit()
-                        showMenu = false
-                    }
-                )
-                
-                DropdownMenuItem(
-                    text = { Text(if (key.isActive) "Deactivate" else "Activate") },
-                    onClick = {
-                        onToggleStatus()
                         showMenu = false
                     }
                 )

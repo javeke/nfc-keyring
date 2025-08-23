@@ -2,6 +2,7 @@ package com.luvia.nfckeychain
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
@@ -25,11 +26,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.luvia.nfckeychain.data.model.NfcTagInfo
 import com.luvia.nfckeychain.nfc.utils.NfcUtils
 import com.luvia.nfckeychain.presentation.theme.NFCKeychainTheme
 import com.luvia.nfckeychain.presentation.ui.components.AddKeyDialog
 import com.luvia.nfckeychain.presentation.ui.components.KeyCard
+import com.luvia.nfckeychain.presentation.ui.components.CreateNdefDialog
 import com.luvia.nfckeychain.presentation.ui.screens.AuthenticationScreen
 import com.luvia.nfckeychain.presentation.viewmodel.KeyViewModel
 
@@ -50,6 +51,7 @@ class MainActivity : FragmentActivity() {
         // Create PendingIntent for NFC
         val intent = Intent(this, javaClass).apply {
             addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
@@ -66,15 +68,19 @@ class MainActivity : FragmentActivity() {
         intentFiltersArray = arrayOf(ndef)
         techListsArray = arrayOf(arrayOf(Ndef::class.java.name))
         
+        // Handle NFC intent if app was launched by NFC
+        handleIntentIfNfc(intent)
+        
         setContent {
             NFCKeychainTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    NFCKeychainApp(
+                    nfcKeychainApp(
                         viewModel = viewModel,
-                        onAuthenticate = { viewModel.authenticate(this) }
+                        onAuthenticate = { viewModel.authenticate(this) },
+                        activity = this
                     )
                 }
             }
@@ -83,12 +89,25 @@ class MainActivity : FragmentActivity() {
     
     override fun onResume() {
         super.onResume()
-        // Only enable NFC if authenticated
-        if (viewModel.isAuthenticated.value) {
+        println("DEBUG: onResume called, isAuthenticated: ${viewModel.isAuthenticated.value}")
+        
+        // Only enable NFC if authenticated and not currently emulating
+        if (viewModel.isAuthenticated.value && !viewModel.isEmulating.value) {
             nfcAdapter?.enableForegroundDispatch(
                 this, pendingIntent, intentFiltersArray, techListsArray
             )
+            println("DEBUG: NFC foreground dispatch enabled")
+        } else {
+            nfcAdapter?.disableForegroundDispatch(this)
+            if (!viewModel.isAuthenticated.value) {
+                println("DEBUG: NFC foreground dispatch disabled (not authenticated)")
+            } else {
+                println("DEBUG: NFC foreground dispatch disabled (emulating)")
+            }
         }
+        
+        // Check if there's a pending NFC intent
+        intent?.let { handleIntentIfNfc(it) }
     }
     
     override fun onPause() {
@@ -100,10 +119,19 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         println("DEBUG: onNewIntent called, action: ${intent.action}")
         println("DEBUG: isAuthenticated: ${viewModel.isAuthenticated.value}")
+        println("DEBUG: isEmulating: ${viewModel.isEmulating.value}")
         
-        // Only handle NFC if authenticated
+        // Set the intent as the current intent to prevent new activity creation
+        setIntent(intent)
+        
+        // Only handle NFC if authenticated and not emulating
         if (!viewModel.isAuthenticated.value) {
             println("DEBUG: Not authenticated, returning early")
+            return
+        }
+        
+        if (viewModel.isEmulating.value) {
+            println("DEBUG: Currently emulating, ignoring NFC intent")
             return
         }
         
@@ -112,6 +140,28 @@ class MainActivity : FragmentActivity() {
             NfcAdapter.ACTION_NDEF_DISCOVERED == intent.action) {
             
             println("DEBUG: NFC intent detected, handling tag")
+            val tag: Tag? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
+            }
+            tag?.let { handleNfcTag(it) }
+        }
+    }
+    
+    private fun handleIntentIfNfc(intent: Intent) {
+        if (NfcAdapter.ACTION_TECH_DISCOVERED == intent.action ||
+            NfcAdapter.ACTION_TAG_DISCOVERED == intent.action ||
+            NfcAdapter.ACTION_NDEF_DISCOVERED == intent.action) {
+            
+            // Don't handle NFC intents if currently emulating
+            if (viewModel.isEmulating.value) {
+                println("DEBUG: NFC intent detected but currently emulating, ignoring")
+                return
+            }
+            
+            println("DEBUG: NFC intent detected in onCreate")
             val tag: Tag? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
             } else {
@@ -150,9 +200,10 @@ class MainActivity : FragmentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NFCKeychainApp(
+fun nfcKeychainApp(
     viewModel: KeyViewModel,
-    onAuthenticate: () -> Unit
+    onAuthenticate: () -> Unit,
+    activity: android.app.Activity
 ) {
     val keys by viewModel.keys.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
@@ -165,7 +216,26 @@ fun NFCKeychainApp(
     val emulationMessage by viewModel.emulationMessage.collectAsStateWithLifecycle()
     
     var showAddKeyDialog by remember { mutableStateOf(false) }
-    var isNfcEnabled by remember { mutableStateOf(true) }
+    var showCreateNdefDialog by remember { mutableStateOf(false) }
+    var editingKey by remember { mutableStateOf<com.luvia.nfckeychain.data.model.NfcKey?>(null) }
+    val context = LocalContext.current
+    var isNfcEnabled by remember { mutableStateOf(NfcAdapter.getDefaultAdapter(context)?.isEnabled == true) }
+
+    // Observe adapter state to update UI dynamically
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: Intent?) {
+                if (intent?.action == NfcAdapter.ACTION_ADAPTER_STATE_CHANGED) {
+                    val state = intent.getIntExtra(NfcAdapter.EXTRA_ADAPTER_STATE, NfcAdapter.STATE_OFF)
+                    isNfcEnabled = (state == NfcAdapter.STATE_ON)
+                    println("DEBUG: NFC adapter state changed, isNfcEnabled=$isNfcEnabled")
+                }
+            }
+        }
+        val filter = IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED)
+        context.registerReceiver(receiver, filter)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     
     // Show authentication screen if not authenticated
     if (!isAuthenticated) {
@@ -183,18 +253,7 @@ fun NFCKeychainApp(
                 title = { Text("NFC Keychain") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
-                ),
-                actions = {
-                    // Lock button
-                    IconButton(
-                        onClick = { viewModel.lockApp() }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Nfc,
-                            contentDescription = "Lock App"
-                        )
-                    }
-                }
+                )
             )
         },
         floatingActionButton = {
@@ -205,6 +264,14 @@ fun NFCKeychainApp(
                     }
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add Key")
+                }
+            } else {
+                FloatingActionButton(
+                    onClick = { 
+                        showCreateNdefDialog = true
+                    }
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Create Manual Tag")
                 }
             }
         }
@@ -220,10 +287,11 @@ fun NFCKeychainApp(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isNfcEnabled) 
-                        MaterialTheme.colorScheme.primaryContainer 
-                    else 
-                        MaterialTheme.colorScheme.errorContainer
+                    containerColor = when {
+                        isEmulating -> MaterialTheme.colorScheme.secondaryContainer
+                        isNfcEnabled -> MaterialTheme.colorScheme.primaryContainer 
+                        else -> MaterialTheme.colorScheme.errorContainer
+                    }
                 )
             ) {
                 Row(
@@ -235,33 +303,42 @@ fun NFCKeychainApp(
                     Icon(
                         imageVector = Icons.Default.Nfc,
                         contentDescription = "NFC Status",
-                        tint = if (isNfcEnabled) 
-                            MaterialTheme.colorScheme.onPrimaryContainer 
-                        else 
-                            MaterialTheme.colorScheme.onErrorContainer
+                        tint = when {
+                            isEmulating -> MaterialTheme.colorScheme.onSecondaryContainer
+                            isNfcEnabled -> MaterialTheme.colorScheme.onPrimaryContainer 
+                            else -> MaterialTheme.colorScheme.onErrorContainer
+                        }
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = if (isNfcEnabled) "NFC Ready" else "NFC Disabled",
+                            text = when {
+                                isEmulating -> "NFC Emulating"
+                                isNfcEnabled -> "NFC Ready"
+                                else -> "NFC Disabled"
+                            },
                             style = MaterialTheme.typography.titleMedium,
-                            color = if (isNfcEnabled) 
-                                MaterialTheme.colorScheme.onPrimaryContainer 
-                            else 
-                                MaterialTheme.colorScheme.onErrorContainer
+                            color = when {
+                                isEmulating -> MaterialTheme.colorScheme.onSecondaryContainer
+                                isNfcEnabled -> MaterialTheme.colorScheme.onPrimaryContainer 
+                                else -> MaterialTheme.colorScheme.onErrorContainer
+                            }
                         )
                         Text(
-                            text = if (lastScannedTag != null) 
+                            text = if (isEmulating) 
+                                "NFC reading disabled (emulating)" 
+                            else if (lastScannedTag != null) 
                                 "Tap + to add the scanned tag" 
                             else if (isNfcEnabled) 
-                                "Tap an NFC tag to read it" 
+                                "Tap an NFC tag to read it or tap + to create a manual tag" 
                             else 
                                 "Enable NFC in settings",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (isNfcEnabled) 
-                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) 
-                            else 
-                                MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                            color = when {
+                                isEmulating -> MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                                isNfcEnabled -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) 
+                                else -> MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                            }
                         )
                     }
                 }
@@ -353,10 +430,7 @@ fun NFCKeychainApp(
                     items(keys) { key ->
                         KeyCard(
                             key = key,
-                            onEdit = {
-                                // TODO: Implement edit functionality
-                                println("Edit key: ${key.name}")
-                            },
+                            onEdit = { editingKey = key },
                             onDelete = {
                                 viewModel.deleteKey(key)
                             },
@@ -367,7 +441,7 @@ fun NFCKeychainApp(
                                 if (viewModel.isKeyBeingEmulated(key)) {
                                     viewModel.stopEmulation()
                                 } else {
-                                    viewModel.startEmulation(key)
+                                    viewModel.startEmulation(key, activity)
                                 }
                             },
                             isEmulating = viewModel.isKeyBeingEmulated(key),
@@ -392,6 +466,36 @@ fun NFCKeychainApp(
                     }
                     showAddKeyDialog = false
                     viewModel.clearLastScannedTag()
+                }
+            )
+        }
+        
+        // Create NDEF Dialog
+        if (showCreateNdefDialog) {
+            CreateNdefDialog(
+                onDismiss = {
+                    showCreateNdefDialog = false
+                },
+                onConfirm = { name, url, description ->
+                    viewModel.addManualNdefKey(name, url, description)
+                    showCreateNdefDialog = false
+                }
+            )
+        }
+
+        // Edit Key Dialog
+        editingKey?.let { key ->
+            com.luvia.nfckeychain.presentation.ui.components.EditKeyDialog(
+                key = key,
+                onDismiss = { editingKey = null },
+                onConfirm = { updatedName, updatedDescription ->
+                    viewModel.updateKey(
+                        key.copy(
+                            name = updatedName,
+                            description = updatedDescription
+                        )
+                    )
+                    editingKey = null
                 }
             )
         }

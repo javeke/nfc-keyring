@@ -9,5 +9,13 @@
         <aid-filter android:name="F0394148148100" />
         <!-- ISO 14443-4 compliant AID -->
         <aid-filter android:name="F0010203040506" />
+        <!-- NDEF AIDs for URL emulation -->
+        <aid-filter android:name="D2760000850101" />
+        <aid-filter android:name="D2760000850100" />
+        <!-- Alternative NDEF AIDs -->
+        <aid-filter android:name="E103" />
+        <aid-filter android:name="E102" />
+        <!-- Generic AID for any tag type -->
+        <aid-filter android:name="F0000000000000" />
     </aid-group>
 </host-apdu-service>

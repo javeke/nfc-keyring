@@ -1,5 +1,6 @@
 package com.luvia.nfckeychain.hce
 
+import android.nfc.NdefMessage
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
 import android.content.Intent
@@ -13,12 +14,27 @@ class HceService : HostApduService() {
     companion object {
         // APDU commands
         private val SELECT_OK_RESPONSE = byteArrayOf(0x90.toByte(), 0x00.toByte())
-        private val UNKNOWN_CMD_RESPONSE = byteArrayOf(0x00.toByte(), 0x00.toByte())
+        private val UNKNOWN_CMD_RESPONSE = byteArrayOf(0x6F.toByte(), 0x00.toByte()) // SW_UNKNOWN
         private val SELECT_APDU_HEADER = byteArrayOf(0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte())
+        
+        // NDEF-specific constants
+        private val NDEF_AID = byteArrayOf(0xD2.toByte(), 0x76.toByte(), 0x00.toByte(), 0x00.toByte(), 0x85.toByte(), 0x01.toByte(), 0x01.toByte())
+        private val NDEF_AID_ALT = byteArrayOf(0xD2.toByte(), 0x76.toByte(), 0x00.toByte(), 0x00.toByte(), 0x85.toByte(), 0x01.toByte(), 0x00.toByte())
+        private val SELECT_NDEF_CMD = byteArrayOf(0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte(), 0x07.toByte())
+        private val READ_BINARY_CMD = byteArrayOf(0x00.toByte(), 0xB0.toByte())
+        private val GET_VERSION_CMD = byteArrayOf(0x60.toByte(), 0x00.toByte())
         
         // Application IDs (AIDs)
         private val KEYCHAIN_AID = "F0394148148100"
         private val ISO_AID = "F0010203040506"
+        // NFC Forum Type 4 Tag file IDs
+        private val CC_FILE_ID = byteArrayOf(0xE1.toByte(), 0x03.toByte())
+        private val NDEF_FILE_ID = byteArrayOf(0xE1.toByte(), 0x04.toByte())
+
+        // File selection identifiers
+        private const val FILE_NONE = 0
+        private const val FILE_CC = 1
+        private const val FILE_NDEF = 2
         
         // Emulation state
         private val _isEmulating = MutableStateFlow(false)
@@ -58,6 +74,13 @@ class HceService : HostApduService() {
             return data
         }
     }
+
+    // Selected file tracking and computed file contents
+    private var selectedFile: Int = FILE_NONE
+    private val ccFileBytes: ByteArray
+        get() = buildCcFile(maxNdefFileSize = 1024)
+    private val ndefFileBytes: ByteArray
+        get() = buildNdefFile()
     
     override fun onCreate() {
         super.onCreate()
@@ -77,45 +100,177 @@ class HceService : HostApduService() {
             return UNKNOWN_CMD_RESPONSE
         }
         
-        // Check if this is a SELECT command
-        if (commandApdu.size >= 4 && 
-            commandApdu[0] == SELECT_APDU_HEADER[0] &&
-            commandApdu[1] == SELECT_APDU_HEADER[1] &&
-            commandApdu[2] == SELECT_APDU_HEADER[2] &&
-            commandApdu[3] == SELECT_APDU_HEADER[3]) {
+        // Handle NDEF SELECT command
+        if (commandApdu.size >= 5 && 
+            commandApdu[0] == 0x00.toByte() && 
+            commandApdu[1] == 0xA4.toByte() && 
+            commandApdu[2] == 0x04.toByte() && 
+            commandApdu[3] == 0x00.toByte() &&
+            commandApdu[4] == 0x07.toByte()) {
             
-            // Extract AID from SELECT command
-            if (commandApdu.size >= 5) {
-                val aidLength = commandApdu[4].toInt() and 0xFF
-                if (commandApdu.size >= 5 + aidLength) {
-                    val aid = commandApdu.sliceArray(5 until 5 + aidLength)
-                    val aidHex = bytesToHex(aid)
-                    println("DEBUG: SELECT command for AID: $aidHex")
-                    
-                    // Check if the AID matches our supported AIDs
-                    if (aidHex == KEYCHAIN_AID || aidHex == ISO_AID) {
-                        println("DEBUG: AID matches, sending OK response")
-                        return SELECT_OK_RESPONSE
-                    }
+            // Check if this is a SELECT NDEF command
+            if (commandApdu.size >= 12) {
+                val aid = commandApdu.sliceArray(5..11)
+                if (aid.contentEquals(NDEF_AID) || aid.contentEquals(NDEF_AID_ALT)) {
+                    println("DEBUG: SELECT NDEF command received for AID: ${bytesToHex(aid)}")
+                    return SELECT_OK_RESPONSE
                 }
             }
         }
         
-        // Handle data read commands
-        if (_isEmulating.value && _currentEmulatedData.value != null) {
-            val emulatedData = _currentEmulatedData.value!!
-            println("DEBUG: Returning emulated data: ${bytesToHex(emulatedData)}")
-            
-            // Return the emulated data with success status
-            return emulatedData + SELECT_OK_RESPONSE
+        // Handle GET VERSION command
+        if (commandApdu.size >= 2 && 
+            commandApdu[0] == 0x60.toByte() && 
+            commandApdu[1] == 0x00.toByte()) {
+            println("DEBUG: GET VERSION command received")
+            // Return NDEF version info
+            val versionResponse = byteArrayOf(0x00.toByte(), 0x03.toByte(), 0x03.toByte(), 0x00.toByte())
+            return versionResponse + SELECT_OK_RESPONSE
         }
         
-        println("DEBUG: Unknown command or no emulation active")
+        // Handle READ BINARY (Type 4 Tag with offsets and selected file)
+        if (commandApdu.size >= 4 &&
+            commandApdu[0] == 0x00.toByte() &&
+            commandApdu[1] == 0xB0.toByte()) {
+            val offset = ((commandApdu[2].toInt() and 0xFF) shl 8) or (commandApdu[3].toInt() and 0xFF)
+            val le = if (commandApdu.size >= 5) (commandApdu[4].toInt() and 0xFF).let { if (it == 0) 256 else it } else 0xFF
+            val fileBytes = when (selectedFile) {
+                FILE_CC -> ccFileBytes
+                FILE_NDEF -> ndefFileBytes
+                else -> ByteArray(0)
+            }
+            if (fileBytes.isEmpty()) {
+                println("DEBUG: READ BINARY requested but no file selected")
+                return UNKNOWN_CMD_RESPONSE
+            }
+            if (offset >= fileBytes.size) {
+                println("DEBUG: READ BINARY offset beyond file size")
+                return SELECT_OK_RESPONSE
+            }
+            val end = kotlin.math.min(offset + le, fileBytes.size)
+            val chunk = fileBytes.copyOfRange(offset, end)
+            return chunk + SELECT_OK_RESPONSE
+        }
+        
+        // Handle READ BINARY with offset (IsoDep style)
+        if (commandApdu.size >= 5 && 
+            commandApdu[0] == 0x00.toByte() && 
+            commandApdu[1] == 0xB0.toByte()) {
+            
+            println("DEBUG: READ BINARY with offset command received")
+            
+            if (_isEmulating.value && _currentEmulatedData.value != null) {
+                val emulatedData = _currentEmulatedData.value!!
+                println("DEBUG: Returning emulated data with offset: ${bytesToHex(emulatedData)}")
+                
+                // Return the emulated data directly
+                val response = ByteArray(emulatedData.size + 2)
+                System.arraycopy(emulatedData, 0, response, 0, emulatedData.size)
+                response[emulatedData.size] = 0x90.toByte()
+                response[emulatedData.size + 1] = 0x00.toByte()
+                
+                return response
+            } else {
+                println("DEBUG: No emulation active")
+                return UNKNOWN_CMD_RESPONSE
+            }
+        }
+        
+        // Handle READ BINARY with offset (some readers use this)
+        if (commandApdu.size >= 5 && 
+            commandApdu[0] == 0x00.toByte() && 
+            commandApdu[1] == 0xB0.toByte()) {
+            
+            println("DEBUG: READ BINARY with offset command received")
+            
+            if (_isEmulating.value && _currentEmulatedData.value != null) {
+                val emulatedData = _currentEmulatedData.value!!
+                println("DEBUG: Returning emulated data: ${bytesToHex(emulatedData)}")
+                
+                // Return the emulated data with success status
+                return emulatedData + SELECT_OK_RESPONSE
+            } else {
+                println("DEBUG: No emulation active")
+                return UNKNOWN_CMD_RESPONSE
+            }
+        }
+        
+        // Handle SELECT APPLICATION command (alternative NDEF selection)
+        if (commandApdu.size >= 5 && 
+            commandApdu[0] == 0x00.toByte() && 
+            commandApdu[1] == 0xA4.toByte() && 
+            commandApdu[2] == 0x04.toByte() && 
+            commandApdu[3] == 0x00.toByte()) {
+            
+            val aidLength = commandApdu[4].toInt() and 0xFF
+            if (commandApdu.size >= 5 + aidLength) {
+                val aid = commandApdu.sliceArray(5 until 5 + aidLength)
+                val aidHex = bytesToHex(aid)
+                println("DEBUG: SELECT APPLICATION command for AID: $aidHex")
+                
+                // Check if the AID matches NDEF or our supported AIDs
+                if (aid.contentEquals(NDEF_AID) || aid.contentEquals(NDEF_AID_ALT) || aidHex == KEYCHAIN_AID || aidHex == ISO_AID) {
+                    println("DEBUG: AID matches, sending OK response for AID: $aidHex")
+                    selectedFile = FILE_NONE
+                    return SELECT_OK_RESPONSE
+                }
+            }
+        }
+        
+        // Handle SELECT FILE command (for CC and NDEF file selection)
+        if (commandApdu.size >= 5 && 
+            commandApdu[0] == 0x00.toByte() && 
+            commandApdu[1] == 0xA4.toByte() && 
+            commandApdu[2] == 0x00.toByte() && 
+            commandApdu[3] == 0x0C.toByte()) {
+            
+            println("DEBUG: SELECT FILE command received")
+            val lc = commandApdu.getOrNull(4)?.toInt() ?: 0
+            if (lc == 0x02) {
+                val fid = commandApdu.sliceArray(5 until 7)
+                when {
+                    fid.contentEquals(CC_FILE_ID) -> {
+                        selectedFile = FILE_CC
+                        println("DEBUG: CC file selected")
+                        return SELECT_OK_RESPONSE
+                    }
+                    fid.contentEquals(NDEF_FILE_ID) -> {
+                        selectedFile = FILE_NDEF
+                        println("DEBUG: NDEF file selected")
+                        return SELECT_OK_RESPONSE
+                    }
+                    else -> {
+                        println("DEBUG: Unknown file selected: ${bytesToHex(fid)}")
+                        return UNKNOWN_CMD_RESPONSE
+                    }
+                }
+            }
+            return UNKNOWN_CMD_RESPONSE
+        }
+        
+        // Handle GET UID command (some readers request this)
+        if (commandApdu.size >= 2 && 
+            commandApdu[0] == 0xFF.toByte() && 
+            commandApdu[1] == 0xCA.toByte()) {
+            println("DEBUG: GET UID command received")
+            // Return a dummy UID
+            val uid = byteArrayOf(0x01.toByte(), 0x02.toByte(), 0x03.toByte(), 0x04.toByte())
+            return uid + SELECT_OK_RESPONSE
+        }
+        
+        // Unknown command
+        
+        println("DEBUG: Unknown command: ${bytesToHex(commandApdu)}")
         return UNKNOWN_CMD_RESPONSE
     }
     
     override fun onDeactivated(reason: Int) {
         println("DEBUG: HCE deactivated with reason: $reason")
+        when (reason) {
+            DEACTIVATION_LINK_LOSS -> println("DEBUG: Deactivation reason: LINK_LOSS")
+            DEACTIVATION_DESELECTED -> println("DEBUG: Deactivation reason: DESELECTED") 
+            else -> println("DEBUG: Deactivation reason: UNKNOWN ($reason)")
+        }
         // Don't stop emulation on deactivation, keep it running until user stops it
     }
     
@@ -128,4 +283,63 @@ class HceService : HostApduService() {
         }
         return String(hexChars)
     }
+    
+    // Build CC file content according to NFC Forum Type 4 Tag spec
+    private fun buildCcFile(maxNdefFileSize: Int): ByteArray {
+        val cclenHi = 0x00.toByte()
+        val cclenLo = 0x0F.toByte() // 15 bytes
+        val mappingVersion = 0x20.toByte() // Version 2.0
+        val mLeHi = 0x00.toByte()
+        val mLeLo = 0xFF.toByte()
+        val mLcHi = 0x00.toByte()
+        val mLcLo = 0xFF.toByte()
+        val t = 0x04.toByte() // NDEF File Control TLV
+        val l = 0x06.toByte()
+        val fidHi = NDEF_FILE_ID[0]
+        val fidLo = NDEF_FILE_ID[1]
+        val maxHi = ((maxNdefFileSize ushr 8) and 0xFF).toByte()
+        val maxLo = (maxNdefFileSize and 0xFF).toByte()
+        val readAccess = 0x00.toByte()
+        val writeAccess = 0x00.toByte()
+        return byteArrayOf(
+            cclenHi, cclenLo, mappingVersion,
+            mLeHi, mLeLo, mLcHi, mLcLo,
+            t, l, fidHi, fidLo, maxHi, maxLo, readAccess, writeAccess
+        )
+    }
+
+    // Build NDEF file: 2-byte NLEN + NDEF message body
+    private fun buildNdefFile(): ByteArray {
+        val body = buildNdefBody()
+        val nlenHi = ((body.size ushr 8) and 0xFF).toByte()
+        val nlenLo = (body.size and 0xFF).toByte()
+        return byteArrayOf(nlenHi, nlenLo) + body
+    }
+
+    // Use provided data as NDEF if valid; else build a minimal Text NDEF
+    private fun buildNdefBody(): ByteArray {
+        val data = currentEmulatedData.value
+        if (data != null) {
+            try {
+                val msg = NdefMessage(data)
+                return msg.toByteArray()
+            } catch (_: Exception) {
+                // Not a valid NDEF payload; fall through
+            }
+        }
+        val languageCode = "en".toByteArray(Charsets.US_ASCII)
+        val textBytes = "NFC Keychain".toByteArray(Charsets.UTF_8)
+        val status = (languageCode.size and 0x3F).toByte()
+        val payload = byteArrayOf(status) + languageCode + textBytes
+        val header = 0xD1.toByte() // MB=1, ME=1, SR=1, TNF=1
+        val type = 0x54.toByte()   // 'T'
+        return byteArrayOf(
+            header,
+            0x01, // type length
+            payload.size.toByte(),
+            type
+        ) + payload
+    }
+
+    // Selected file tracking moved to companion and property above
 }
