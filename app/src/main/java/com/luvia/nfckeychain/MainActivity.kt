@@ -31,6 +31,9 @@ import com.luvia.nfckeychain.presentation.theme.NFCKeychainTheme
 import com.luvia.nfckeychain.presentation.ui.components.AddKeyDialog
 import com.luvia.nfckeychain.presentation.ui.components.KeyCard
 import com.luvia.nfckeychain.presentation.ui.components.CreateNdefDialog
+import com.luvia.nfckeychain.data.prefs.Preferences
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import com.luvia.nfckeychain.presentation.ui.screens.AuthenticationScreen
 import com.luvia.nfckeychain.presentation.viewmodel.KeyViewModel
 
@@ -77,7 +80,7 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    nfcKeychainApp(
+                    NfcKeychainApp(
                         viewModel = viewModel,
                         onAuthenticate = { viewModel.authenticate(this) },
                         activity = this
@@ -200,7 +203,7 @@ class MainActivity : FragmentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun nfcKeychainApp(
+fun NfcKeychainApp(
     viewModel: KeyViewModel,
     onAuthenticate: () -> Unit,
     activity: android.app.Activity
@@ -213,6 +216,7 @@ fun nfcKeychainApp(
     val biometricAvailable by viewModel.biometricAvailable.collectAsStateWithLifecycle()
     val isEmulating by viewModel.isEmulating.collectAsStateWithLifecycle()
     val emulatedTagId by viewModel.emulatedTagId.collectAsStateWithLifecycle()
+    val autoStopOnRead by viewModel.autoStopOnRead.collectAsStateWithLifecycle()
     val emulationMessage by viewModel.emulationMessage.collectAsStateWithLifecycle()
     
     var showAddKeyDialog by remember { mutableStateOf(false) }
@@ -346,7 +350,7 @@ fun nfcKeychainApp(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Emulation Status Card
+            // Emulation Status Card + Auto-stop toggle
             if (isEmulating && emulatedTagId != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -383,6 +387,27 @@ fun nfcKeychainApp(
                         ) {
                             Text("Stop")
                         }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Auto-stop after first read",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = autoStopOnRead,
+                            onCheckedChange = { viewModel.setAutoStopOnRead(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
                     }
                 }
                 
@@ -442,6 +467,13 @@ fun nfcKeychainApp(
                                     viewModel.stopEmulation()
                                 } else {
                                     viewModel.startEmulation(key, activity)
+                                    // Set as favorite on emulate start for tile/widget
+                                    Preferences.setFavorite(
+                                        context = activity,
+                                        tagId = key.tagId,
+                                        name = key.name,
+                                        dataHex = key.data
+                                    )
                                 }
                             },
                             isEmulating = viewModel.isKeyBeingEmulated(key),

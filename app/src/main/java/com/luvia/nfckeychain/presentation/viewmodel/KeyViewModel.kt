@@ -47,6 +47,7 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     // Emulation state - use HceService directly for state
     val isEmulating: StateFlow<Boolean> = com.luvia.nfckeychain.hce.HceService.isEmulating
     val emulatedTagId: StateFlow<String?> = com.luvia.nfckeychain.hce.HceService.emulatedTagId
+    val autoStopOnRead: StateFlow<Boolean> = com.luvia.nfckeychain.hce.HceService.autoStopOnRead
     
     private val _emulationMessage = MutableStateFlow<String?>(null)
     val emulationMessage: StateFlow<String?> = _emulationMessage.asStateFlow()
@@ -119,12 +120,34 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
         
         viewModelScope.launch {
             try {
+                // Prefer storing raw NDEF bytes if available so we can emulate exactly
+                val ndefBytes = tagInfo.ndefMessage?.toByteArray()
+                val storedDataHex = when {
+                    ndefBytes != null -> {
+                        val hex = NfcUtils.bytesToHex(ndefBytes)
+                        println("DEBUG: Storing scanned NDEF bytes for ${tagInfo.tagId}, length=${ndefBytes.size}")
+                        hex
+                    }
+                    data.isNotBlank() && data.matches(Regex("^[0-9A-Fa-f]+$")) -> {
+                        // User provided hex
+                        data
+                    }
+                    data.isNotBlank() -> {
+                        // Store user text as bytes hex
+                        NfcUtils.bytesToHex(data.toByteArray(Charsets.UTF_8))
+                    }
+                    else -> {
+                        // Fallback to tag ID bytes (not ideal for emulation)
+                        NfcUtils.bytesToHex(tagInfo.tagId.toByteArray(Charsets.UTF_8))
+                    }
+                }
+
                 val newKey = NfcKey(
                     name = name,
                     description = description,
                     tagId = tagInfo.tagId,
                     tagType = tagInfo.tagType,
-                    data = data
+                    data = storedDataHex
                 )
                 repository.insertKey(newKey)
                 // The Flow will automatically update the keys list
@@ -293,5 +316,9 @@ class KeyViewModel(application: Application) : AndroidViewModel(application) {
     
     fun clearEmulationMessage() {
         _emulationMessage.value = null
+    }
+
+    fun setAutoStopOnRead(enabled: Boolean) {
+        com.luvia.nfckeychain.hce.HceService.setAutoStopOnRead(enabled)
     }
 }

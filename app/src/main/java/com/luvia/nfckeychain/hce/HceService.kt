@@ -4,7 +4,8 @@ import android.nfc.NdefMessage
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
 import android.content.Intent
-import android.content.Context
+import com.luvia.nfckeychain.data.prefs.Preferences
+import com.luvia.nfckeychain.nfc.utils.NfcUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,14 @@ class HceService : HostApduService() {
         private const val FILE_NONE = 0
         private const val FILE_CC = 1
         private const val FILE_NDEF = 2
+
+        // Auto-stop after first successful read flag
+        private val _autoStopOnRead = MutableStateFlow(false)
+        val autoStopOnRead: StateFlow<Boolean> = _autoStopOnRead.asStateFlow()
+        fun setAutoStopOnRead(enabled: Boolean) {
+            _autoStopOnRead.value = enabled
+            println("DEBUG: autoStopOnRead set to $enabled")
+        }
         
         // Emulation state
         private val _isEmulating = MutableStateFlow(false)
@@ -51,7 +60,7 @@ class HceService : HostApduService() {
             _emulatedTagId.value = tagId
             _currentEmulatedData.value = data
             _isEmulating.value = true
-            println("DEBUG: HCE emulation started for tag: $tagId")
+            println("DEBUG: HCE emulation started for tag: $tagId bytes=${data.size}")
         }
         
         fun stopEmulation() {
@@ -149,50 +158,13 @@ class HceService : HostApduService() {
             }
             val end = kotlin.math.min(offset + le, fileBytes.size)
             val chunk = fileBytes.copyOfRange(offset, end)
-            return chunk + SELECT_OK_RESPONSE
-        }
-        
-        // Handle READ BINARY with offset (IsoDep style)
-        if (commandApdu.size >= 5 && 
-            commandApdu[0] == 0x00.toByte() && 
-            commandApdu[1] == 0xB0.toByte()) {
-            
-            println("DEBUG: READ BINARY with offset command received")
-            
-            if (_isEmulating.value && _currentEmulatedData.value != null) {
-                val emulatedData = _currentEmulatedData.value!!
-                println("DEBUG: Returning emulated data with offset: ${bytesToHex(emulatedData)}")
-                
-                // Return the emulated data directly
-                val response = ByteArray(emulatedData.size + 2)
-                System.arraycopy(emulatedData, 0, response, 0, emulatedData.size)
-                response[emulatedData.size] = 0x90.toByte()
-                response[emulatedData.size + 1] = 0x00.toByte()
-                
-                return response
-            } else {
-                println("DEBUG: No emulation active")
-                return UNKNOWN_CMD_RESPONSE
-            }
-        }
-        
-        // Handle READ BINARY with offset (some readers use this)
-        if (commandApdu.size >= 5 && 
-            commandApdu[0] == 0x00.toByte() && 
-            commandApdu[1] == 0xB0.toByte()) {
-            
-            println("DEBUG: READ BINARY with offset command received")
-            
-            if (_isEmulating.value && _currentEmulatedData.value != null) {
-                val emulatedData = _currentEmulatedData.value!!
-                println("DEBUG: Returning emulated data: ${bytesToHex(emulatedData)}")
-                
-                // Return the emulated data with success status
-                return emulatedData + SELECT_OK_RESPONSE
-            } else {
-                println("DEBUG: No emulation active")
-                return UNKNOWN_CMD_RESPONSE
-            }
+            val response = chunk + SELECT_OK_RESPONSE
+            // If auto-stop is enabled and we're reading NDEF file, stop emulation after serving data
+//            if (selectedFile == FILE_NDEF && _autoStopOnRead.value) {
+//                println("DEBUG: Auto-stop after read triggered")
+//                stopEmulation()
+//            }
+            return response
         }
         
         // Handle SELECT APPLICATION command (alternative NDEF selection)
@@ -318,15 +290,39 @@ class HceService : HostApduService() {
 
     // Use provided data as NDEF if valid; else build a minimal Text NDEF
     private fun buildNdefBody(): ByteArray {
-        val data = currentEmulatedData.value
-        if (data != null) {
-            try {
-                val msg = NdefMessage(data)
-                return msg.toByteArray()
-            } catch (_: Exception) {
-                // Not a valid NDEF payload; fall through
+        var bytes: ByteArray? = currentEmulatedData.value
+        if (bytes == null) {
+            // Attempt to backfill from favorite (tile/widget path)
+            Preferences.getFavoriteDataHex(this)?.let { hex ->
+                val parsed = runCatching { NfcUtils.hexToBytes(hex) }.getOrNull()
+                if (parsed != null) {
+                    _currentEmulatedData.value = parsed
+                    bytes = parsed
+                    println("DEBUG: Backfilled emulation bytes from favorite, len=${parsed.size}")
+                }
             }
         }
+        val data = bytes
+        if (data != null) {
+            // Normalize legacy TLV-wrapped payload [0x00, len, message]
+            val normalized = if (data.size >= 3 && data[0] == 0x00.toByte()) {
+                val len = (data[1].toInt() and 0xFF)
+                if (len == data.size - 2) data.copyOfRange(2, data.size) else data
+            } else data
+            return try {
+                val msg = NdefMessage(normalized)
+                println("DEBUG: Using provided NDEF payload, length=${normalized.size}")
+                msg.toByteArray()
+            } catch (e: Exception) {
+                println("DEBUG: Provided data not valid NDEF (${e.message}), falling back")
+                buildFallbackTextNdef()
+            }
+        }
+        // No data at all → fallback text NDEF
+        return buildFallbackTextNdef()
+    }
+
+    private fun buildFallbackTextNdef(): ByteArray {
         val languageCode = "en".toByteArray(Charsets.US_ASCII)
         val textBytes = "NFC Keychain".toByteArray(Charsets.UTF_8)
         val status = (languageCode.size and 0x3F).toByte()
@@ -343,3 +339,5 @@ class HceService : HostApduService() {
 
     // Selected file tracking moved to companion and property above
 }
+
+

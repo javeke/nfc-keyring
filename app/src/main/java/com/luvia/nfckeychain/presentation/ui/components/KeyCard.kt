@@ -108,13 +108,32 @@ fun KeyCard(
                     )
                 }
                 
-                // Date Row
+                // Date Row + Emulating Chip
                 Text(
                     text = "Created: ${dateFormat.format(Date(key.createdAt))}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
+
+                if (isEmulating) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("Emulating") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null
+                            )
+                        },
+                        colors = AssistChipDefaults.assistChipColors(
+                            labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            leadingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        ),
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
                 
                 if (!key.isActive) {
                     Text(
